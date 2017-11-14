@@ -3,41 +3,49 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/docopt/docopt-go"
 	"log"
 	"net"
 	"os"
+	"time"
+	"flag"
 )
 
 func main() {
-	usage := `Multicast Dump.
+	hex := flag.Bool("x", false, "Output hexdump -C style output")
+	raw := flag.Bool("r", false, "Output raw bytes received, suitable to pipe to a file or other program")
+	sendPing := flag.Bool("p", false, "Send ping packets with counter to the same group")
+	flag.Usage = func () {
+		fmt.Printf("Usage: mcast [-x | -r] [-p] ADDRESS:PORT\n")
+	}
+	flag.Parse()
 
-Usage:
-  mcast [-x | -r] ADDRESS:PORT
-  mcast -h | --help
-  mcast --version
+	address := flag.Arg(0)
+	fmt.Printf("Address: %s\n", address)
 
-Arguments:
-  ADDRESS:PORT  The multicast address and port to listen on.
-
-Options:
-  -h --help     Show this screen.
-  --version     Show version.
-  -x            Output hexdump -C style output instead of raw bytes.
-  -r            Output raw bytes, suitable to pipe to a file or other program.
-
-If neither -x or -r is specified, it logs the source address of the packets and the number of bytes.
-`
-	args, _ := docopt.Parse(usage, nil, true, "mcast 1.0", false)
 	//fmt.Println(args)
 	logpackets := true
-	raw := args["-r"].(bool)
-	hex := args["-x"].(bool)
-	if raw {
+	if *raw {
 		logpackets = false
 	}
-	address := args["ADDRESS:PORT"].(string)
-	listen(address, logpackets, hex, raw)
+	if *sendPing {
+		go ping(address)
+	}
+	listen(address, logpackets, *hex, *raw)
+}
+
+func ping(a string) {
+	addr, err := net.ResolveUDPAddr("udp", a)
+	if err != nil {
+		log.Fatal(err)
+	}
+	c, err := net.DialUDP("udp", nil, addr)
+	count := uint64(0)
+	for {
+		msg := fmt.Sprintf("%6d: ping\n", count)
+		c.Write([]byte(msg))
+		time.Sleep(1 * time.Second)
+		count++
+	}
 }
 
 func listen(a string, logpackets bool, hexdump bool, raw bool) {
