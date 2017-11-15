@@ -8,13 +8,14 @@ import (
 	"os"
 	"time"
 	"flag"
+	"golang.org/x/net/ipv4"
 )
 
 func main() {
 	hex := flag.Bool("x", false, "Output hexdump -C style output")
 	raw := flag.Bool("r", false, "Output raw bytes received, suitable to pipe to a file or other program")
-	sendPing := flag.Bool("p", false, "Send ping packets with counter to the same group")
-	flag.Usage = func () {
+	sendPing := flag.Bool("p", false, "Send ping packets with counter to the same group via the specified adapter (en0, eth0, etc)")
+	flag.Usage = func() {
 		fmt.Printf("Usage: mcast [-x | -r] [-p] ADDRESS:PORT\n")
 	}
 	flag.Parse()
@@ -33,16 +34,36 @@ func main() {
 	listen(address, logpackets, *hex, *raw)
 }
 
-func ping(a string) {
-	addr, err := net.ResolveUDPAddr("udp", a)
+func ping(address string) {
+	conn, err := net.ListenPacket("udp", address)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	c, err := net.DialUDP("udp", nil, addr)
+	defer conn.Close()
+	packetConn := ipv4.NewPacketConn(conn)
+	mcastLoop, err := packetConn.MulticastLoopback()
+	if err != nil {
+		panic(err)
+	}
+	err = packetConn.SetMulticastTTL(32)
+	if err != nil {
+		log.Fatal("Failed to set multicaset ttl: ", err)
+	}
+	log.Printf("Multicast loopback: %v", mcastLoop)
+	mcastTtl, err := packetConn.MulticastTTL()
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Multicast TTL: %d", mcastTtl)
+	dst, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		log.Fatalf("Failed to resolve udp address: %s", address)
+	}
 	count := uint64(0)
 	for {
 		msg := fmt.Sprintf("%6d: ping\n", count)
-		c.Write([]byte(msg))
+		packetConn.WriteTo([]byte(msg), nil, dst)
+		log.Printf("Sent: %s", msg)
 		time.Sleep(1 * time.Second)
 		count++
 	}
